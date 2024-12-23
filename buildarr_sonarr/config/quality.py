@@ -33,7 +33,7 @@ from ..api import api_get, api_put
 from ..secrets import SonarrSecrets
 from .types import SonarrConfigBase
 
-QUALITYDEFINITION_MAX = 400
+QUALITYDEFINITION_MAX = 2000
 """
 The upper bound for the maximum quality allowed in a quality definition.
 """
