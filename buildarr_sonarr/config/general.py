@@ -19,7 +19,8 @@ Sonarr plugin general settings configuration.
 from __future__ import annotations
 
 from ipaddress import IPv4Address
-from typing import Any, ClassVar, Dict, List, Literal, Mapping, Optional, Set, Tuple, Union
+from typing import (Any, ClassVar, Dict, List, Literal, Mapping, Optional, Set,
+                    Tuple, Union)
 
 from buildarr.config import RemoteMapEntry
 from buildarr.types import BaseEnum, NonEmptyStr, Port, SecretStr
@@ -39,6 +40,7 @@ class AuthenticationMethod(BaseEnum):
     none = "none"
     basic = "basic"
     form = "forms"
+    external = "external"
 
 
 class CertificateValidation(BaseEnum):
