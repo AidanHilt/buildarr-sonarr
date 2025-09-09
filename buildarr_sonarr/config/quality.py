@@ -24,7 +24,7 @@ from typing import Dict, Optional, cast
 from buildarr.config import ConfigTrashIDNotFoundError
 from buildarr.state import state
 from buildarr.types import TrashID
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, validator
 from typing_extensions import Annotated, Self
 
 from ..api import api_get, api_put
@@ -59,7 +59,7 @@ class QualityDefinition(SonarrConfigBase):
     The minimum Megabytes per Minute (MB/min) a quality can have.
     Must be set at least 1MB/min lower than `max`.
 
-    The minimum value is `0`, and the maximum value is `399`.
+    The minimum value is `0`, and the maximum value is `1000`.
     """
 
     preferred: Annotated[float, Field(..., ge=0, le=QUALITYDEFINITION_PREFERRED_MAX)]
@@ -77,9 +77,9 @@ class QualityDefinition(SonarrConfigBase):
     The maximum Megabytes per Minute (MB/min) a quality can have.
     Must be set at least 1MB/min higher than `min`.
 
-    If set to `None` or `400`, the maximum bit rate will be unlimited.
+    If set to `None` or `1000`, the maximum bit rate will be unlimited.
 
-    If not set to `None`, the minimum value is `1`, and the maximum value is `400`.
+    If not set to `None`, the minimum value is `1`, and the maximum value is `1000`.
     """
 
     preferred: Annotated[float, Field(ge=0)]
@@ -116,6 +116,7 @@ class SonarrQualitySettingsConfig(SonarrConfigBase):
           definitions:
             Bluray-480p: # "Quality" column name (not "Title")
               min: 2
+              preferred: null # Max preferred
               max: 100
             # Add additional override quality definitions here
     ```

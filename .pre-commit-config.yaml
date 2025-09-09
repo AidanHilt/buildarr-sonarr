@@ -1,32 +1,33 @@
----
-# .pre-commit-config.yml
-# Pre-commit hook tasks.
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
-
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: "v4.5.0"
-    hooks:
-      - id: trailing-whitespace
-      - id: mixed-line-ending
-      - id: end-of-file-fixer
-      - id: detect-private-key
-      - id: check-added-large-files
-      - id: check-merge-conflict
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.4.2"
-    hooks:
-      - id: ruff
-      - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.10.0"
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - buildarr==0.8.0b1
-          - types-requests==2.31.0.20240406
-  - repo: https://github.com/pdm-project/pdm
-    rev: "2.15.1"
-    hooks:
-      - id: pdm-lock-check
+- hooks:
+  - id: trailing-whitespace
+  - id: mixed-line-ending
+  - id: end-of-file-fixer
+  - id: detect-private-key
+  - id: check-added-large-files
+  - id: check-merge-conflict
+  repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.5.0
+- hooks:
+  - id: ruff
+  - id: ruff-format
+  repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.4.2
+- hooks:
+  - additional_dependencies:
+    - buildarr==0.8.0b1
+    - types-requests==2.31.0.20240406
+    id: mypy
+  repo: https://github.com/pre-commit/mirrors-mypy
+  rev: v1.10.0
+- hooks:
+  - id: pdm-lock-check
+  repo: https://github.com/pdm-project/pdm
+  rev: 2.15.1
+- hooks:
+  - id: commitizen
+  - id: commitizen-branch
+    stages:
+    - push
+  repo: https://github.com/commitizen-tools/commitizen
+  rev: v3.29.1

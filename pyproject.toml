@@ -35,10 +35,11 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "buildarr>=0.8.0b0,<0.9.0",
+    "buildarr @ git+https://github.com/rebuildarr/buildarr.git@main",
     "json5>=0.9.7",
+    "sonarr-py>=1.0.2",
 ]
-dynamic = ["version"]
+version = "0.7.0"
 
 [project.urls]
 Homepage = "https://buildarr.github.io"
@@ -168,3 +169,11 @@ exclude_also = [
     'if __name__ == "__main__":',
     "raise NotImplementedError",
 ]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver2"
+version_provider = "pep621"
+update_changelog_on_bump = true
+major_version_zero = true

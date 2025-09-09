@@ -18,21 +18,24 @@ Sonarr plugin API functions.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from http import HTTPStatus
 from logging import getLogger
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import json5  # type: ignore[import]
 import requests
 
+from contextlib import contextmanager
 from buildarr.state import state
+from sonarr import ApiClient, Configuration
 
 from .exceptions import SonarrAPIError
 
 if TYPE_CHECKING:
-    from typing import Any, Dict, Optional, Union
+    from typing import Any, Dict, Optional, Union, Generator
 
     from .secrets import SonarrSecrets
 
@@ -40,6 +43,44 @@ if TYPE_CHECKING:
 logger = getLogger(__name__)
 
 INITIALIZE_JS_RES_PATTERN = re.compile(r"(?s)^window\.Sonarr = ({.*});$")
+
+
+@contextmanager
+def sonarr_api_client(
+    *,
+    secrets: Optional[SonarrSecrets] = None,
+    host_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Generator[ApiClient, None, None]:
+    """
+    Create a Sonarr API client object, and make it available within a context.
+
+    Args:
+        secrets (Optional[SonarrSecrets], optional): Instance secrets. Defaults to `None`.
+        host_url (Optional[str], optional): Host URL, if no secrets used. Defaults to `None`.
+
+    Yields:
+        Sonarr API client object
+    """
+
+    configuration = Configuration(
+        host=secrets.host_url if secrets else host_url,
+    )
+
+    root_logger = logging.getLogger()
+    configuration.logger_format = cast(
+        str,
+        cast(logging.Formatter, root_logger.handlers[0].formatter)._fmt,
+    )
+    configuration.debug = logging.getLevelName(root_logger.level) == "DEBUG"
+
+    if secrets:
+        configuration.api_key["X-Api-Key"] = secrets.api_key.get_secret_value()
+    elif api_key:
+        configuration.api_key["X-Api-Key"] = api_key
+
+    with ApiClient(configuration) as api_client:
+        yield api_client
 
 
 def get_initialize_js(host_url: str, api_key: Optional[str] = None) -> Dict[str, Any]:

@@ -21,12 +21,14 @@ from __future__ import annotations
 from logging import getLogger
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Union, cast
 
+import sonarr
+
 from buildarr.config import RemoteMapEntry
 from buildarr.types import NonEmptyStr
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator, validator
 from typing_extensions import Annotated, Self
 
-from ...api import api_delete, api_get, api_post, api_put
+from ...api import api_delete, api_get, api_post, api_put, sonarr_api_client
 from ...secrets import SonarrSecrets
 from ..types import SonarrConfigBase
 
@@ -52,6 +54,30 @@ class QualityGroup(SonarrConfigBase):
                 _encode_quality_str(quality_definitions, member, True) for member in self.members
             ],
         }
+
+
+class CustomFormatScore(SonarrConfigBase):
+    """
+    Custom format score definitions in quality profiles can have the
+    following attributes assigned to them.
+    """
+
+    name: NonEmptyStr
+    """
+    The name of the custom format to assign a score to. Required.
+    """
+
+    score: Optional[int] = None
+    """
+    The score to add to the release if the custom format is applied.
+
+    If not defined, Buildarr will use the `default_score` attribute
+    from the custom format definition.
+    This allows for defining a common score for a custom format
+    shared between multiple quality profiles.
+
+    If `default_score` is not defined, the score will be set to `0` (ignore this custom format).
+    """
 
 
 class QualityProfile(SonarrConfigBase):
@@ -118,6 +144,37 @@ class QualityProfile(SonarrConfigBase):
     ```
 
     At least one quality must be specified.
+    """
+
+    minimum_custom_format_score: int = 0
+    """
+    The minimum sum of custom format scores matching a release
+    for the release to be considered for download.
+
+    If the score sum is below this number, it will not be downloaded.
+    """
+
+    upgrade_until_custom_format_score: int = 0
+    """
+    The maximum sum of custom format scores to upgrade a movie to.
+
+    Once this number is reached, Radarr will no longer upgrade movie releases
+    based on custom format score.
+
+    This must be greater than or equal to `minimum_custom_format_score`.
+    """
+
+    minimum_custom_format_score_increment: Annotated[int, Field(ge=1)] = 1
+    """
+    Minimum required improvement of the custom format score between
+    existing and new releases before Radarr considers it an upgrade.
+
+    Must be greater than or equal to 1.
+    """
+
+    custom_formats: List[CustomFormatScore] = []
+    """
+    Map scores for each custom format applicable to a quality profile here.
     """
 
     upgrade_until: Optional[NonEmptyStr] = None
@@ -189,13 +246,60 @@ class QualityProfile(SonarrConfigBase):
             raise ValueError("must be set to a value enabled in 'qualities'")
         return value
 
+    @validator("upgrade_until_custom_format_score")
+    def validate_upgrade_until_custom_format_score(cls, value: int, values: Dict[str, Any]) -> int:
+        try:
+            minimum_custom_format_score = values["minimum_custom_format_score"]
+        except KeyError:
+            return value
+        if value < minimum_custom_format_score:
+            raise ValueError(
+                (
+                    f"value ({value}) must be greater than "
+                    f"'minimum_custom_format_score' ({minimum_custom_format_score})"
+                ),
+            )
+        return value
+
+    @validator("custom_formats")
+    def validate_custom_format(cls, value: List[CustomFormatScore]) -> List[CustomFormatScore]:
+        custom_format_names: Dict[str, Optional[int]] = {}
+        custom_formats: List[CustomFormatScore] = []
+        for cf in value:
+            if cf.name in custom_format_names:
+                first_score = custom_format_names[cf.name]
+                # Just ignore the duplicate definition if the score is the same.
+                if first_score == cf.score:
+                    continue
+                raise ValueError(
+                    (
+                        f"more than one score defined for custom format '{cf.name}'"
+                        f" (scores: {first_score}, {cf.score})"
+                    ),
+                )
+            custom_format_names[cf.name] = cf.score
+            custom_formats.append(cf)
+        return custom_formats
+
     @classmethod
     def _get_remote_map(
         cls,
         quality_definitions: Mapping[str, Mapping[str, Any]] = {},
+        api_customformats: Mapping[str, sonarr.CustomFormatResource] = {},
         group_ids: Mapping[str, int] = {},
     ) -> List[RemoteMapEntry]:
         return [
+            ("minimum_custom_format_score", "minFormatScore", {}),
+            ("upgrade_until_custom_format_score", "cutoffFormatScore", {}),
+            ("minimum_custom_format_score_increment", "minUpgradeFormatScore", {}),
+            (
+                "custom_formats",
+                "formatItems",
+                {
+                    "decoder": lambda v: cls._custom_formats_decoder(v),
+                    "encoder": lambda v: cls._custom_formats_encoder(api_customformats, v),
+                },
+            ),
             ("upgrades_allowed", "upgradeAllowed", {}),
             (
                 "upgrade_until",
@@ -264,6 +368,41 @@ class QualityProfile(SonarrConfigBase):
         )
 
     @classmethod
+    def _custom_formats_decoder(
+        cls,
+        api_customformat_scores: List[Mapping[str, Any]],
+    ) -> List[CustomFormatScore]:
+        return sorted(
+            (
+                CustomFormatScore(name=api_cfs["name"], score=api_cfs["score"])
+                for api_cfs in api_customformat_scores
+                if api_cfs["score"] != 0
+            ),
+            key=lambda cfs: (-cast(int, cfs.score), cfs.name),
+        )
+
+    @classmethod
+    def _custom_formats_encoder(
+        cls,
+        api_customformats: Mapping[str, sonarr.CustomFormatResource],
+        customformat_scores: List[CustomFormatScore],
+    ) -> List[Dict[str, Any]]:
+        customformat_names: Set[str] = set()
+        custom_formats: List[Dict[str, Any]] = []
+        for cfs in customformat_scores:
+            custom_formats.append(
+                {"format": api_customformats[cfs.name].id, "name": cfs.name, "score": cfs.score},
+            )
+            customformat_names.add(cfs.name)
+        for customformat_name, api_customformat in api_customformats.items():
+            if customformat_name not in customformat_names:
+                custom_formats.append(
+                    {"format": api_customformat.id, "name": customformat_name, "score": 0},
+                )
+                customformat_names.add(customformat_name)
+        return custom_formats
+
+    @classmethod
     def _from_remote(cls, remote_attrs: Mapping[str, Any]) -> Self:
         return cls(**cls.get_local_attrs(cls._get_remote_map(), remote_attrs))
 
@@ -273,6 +412,7 @@ class QualityProfile(SonarrConfigBase):
         secrets: SonarrSecrets,
         profile_name: str,
         quality_definitions: Mapping[str, Mapping[str, Any]],
+        api_customformats: Mapping[str, sonarr.CustomFormatResource],
     ) -> None:
         group_ids: Dict[str, int] = {
             quality_group.name: (1000 + i)
@@ -288,7 +428,9 @@ class QualityProfile(SonarrConfigBase):
                 "name": profile_name,
                 **self.get_create_remote_attrs(
                     tree,
-                    self._get_remote_map(quality_definitions, group_ids),
+                    self._get_remote_map(quality_definitions=quality_definitions,
+                                         api_customformats=api_customformats,
+                                         group_ids=group_ids),
                 ),
             },
         )
@@ -301,6 +443,7 @@ class QualityProfile(SonarrConfigBase):
         profile_id: int,
         profile_name: str,
         quality_definitions: Mapping[str, Mapping[str, Any]],
+        api_customformats: Mapping[str, sonarr.CustomFormatResource],
     ) -> bool:
         group_ids: Dict[str, int] = {
             quality_group.name: (1000 + i)
@@ -312,7 +455,9 @@ class QualityProfile(SonarrConfigBase):
         changed, remote_attrs = self.get_update_remote_attrs(
             tree,
             remote,
-            self._get_remote_map(quality_definitions, group_ids),
+            self._get_remote_map(quality_definitions=quality_definitions,
+                                 api_customformats=api_customformats,
+                                 group_ids=group_ids),
             check_unmanaged=True,
             set_unchanged=True,
         )
@@ -380,6 +525,12 @@ class SonarrQualityProfilesSettingsConfig(SonarrConfigBase):
                 reverse=True,
             )
         }
+        with sonarr_api_client(secrets=secrets) as api_client:
+            api_customformats: Dict[str, sonarr.CustomFormatResource] = {
+                api_customformat.name: api_customformat
+                for api_customformat in sonarr.CustomFormatApi(api_client).list_custom_format()
+            }
+
         for profile_name, profile in self.definitions.items():
             profile_tree = f"{tree}.definitions[{profile_name!r}]"
             if profile_name not in remote.definitions:
@@ -388,6 +539,7 @@ class SonarrQualityProfilesSettingsConfig(SonarrConfigBase):
                     secrets=secrets,
                     profile_name=profile_name,
                     quality_definitions=quality_definitions,
+                    api_customformats=api_customformats,
                 )
                 changed = True
             elif profile._update_remote(
@@ -397,6 +549,7 @@ class SonarrQualityProfilesSettingsConfig(SonarrConfigBase):
                 profile_id=profile_ids[profile_name],
                 profile_name=profile_name,
                 quality_definitions=quality_definitions,
+                api_customformats=api_customformats,
             ):
                 changed = True
         return changed
